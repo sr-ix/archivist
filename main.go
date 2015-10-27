@@ -19,11 +19,14 @@ import (
 var runStage = flag.String("stage", "", "specify the stage to run - can be \"mapper\" or \"reducer\"")
 var numDelims = flag.Uint("numDelims", 0, "specify the number of times the delimiter is expected to appear in each line")
 var filename = flag.String("file", "", "specify the file to open")
+var destination = flag.String("destination", "", "specify where to write results")
+var badRows = flag.String("badRows", "", "specify where to write bad rows")
+var bufferSize = flag.Uint("bufferSize", 8196, "specify the buffer size to use why scanning through files")
 
 func main() {
 	flag.Parse()
 
-	if *runStage == "" || *numDelims == 0 || *filename == "" {
+	if *runStage == "" || *numDelims == 0 || *filename == "" || *destination == "" || *badRows == "" {
 		flag.PrintDefaults()
 		return
 	}
@@ -65,6 +68,7 @@ func runMapper() {
 
 	jobs := make(chan []byte)
 	results := make(chan string)
+	//bad := make(chan string)
 
 	wg := new(sync.WaitGroup)
 	for w := 0; w <= 3; w++ {
@@ -85,35 +89,36 @@ func runMapper() {
 	}()
 
 	for v := range results {
-		fmt.Fprintf(os.Stderr, "working with: %s\n", v)
+		fmt.Fprintf(os.Stdout, "%s\n", v)
 	}
 }
 
 func normalizeLines(jobs <-chan []byte, results chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for j := range jobs {
-		in := bufio.NewReader(bytes.NewReader(j))
-
-		line, err := in.ReadString('\n')
-
-		if foundEOF(err) {
-			break
-		}
+	j := <-jobs
+	scanner := bufio.NewScanner(bytes.NewReader(j))
+	for scanner.Scan() {
+		line := scanner.Text()
 
 		//delimCount := uint(strings.Count(line, "|"))
 
 		values := strings.Split(line, "|")
 
+		var buf bytes.Buffer
+
 		for _, value := range values {
 			trimmedValue := strings.TrimSpace(value)
+
+			buf.WriteString(trimmedValue)
+
 			if !strings.Contains(value, "\n") {
-				fmt.Printf("%s\\|", trimmedValue)
+				buf.WriteString("\\|")
 			} else {
-				fmt.Printf("%s\n", trimmedValue)
+				buf.WriteString("\n")
 			}
 		}
-		results <- string(j)
+		results <- string(buf.String())
 	}
 }
 
@@ -142,7 +147,7 @@ func foundEOF(e error) bool {
 
 func countLines(r io.Reader) (int, error) {
 	// play with this buffer size to optimize for speed
-	buf := make([]byte, 8196)
+	buf := make([]byte, *bufferSize)
 	lineCount := 0
 	lineSep := []byte{'\n'}
 
