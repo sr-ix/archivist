@@ -97,7 +97,7 @@ func normalizeLines(jobs <-chan []byte, results chan<- string, wg *sync.WaitGrou
 
 		line, err := in.ReadString('\n')
 
-		if checkEOF(err) {
+		if foundEOF(err) {
 			break
 		}
 
@@ -131,7 +131,7 @@ func check(e error) {
 	}
 }
 
-func checkEOF(e error) bool {
+func foundEOF(e error) bool {
 	if e == io.EOF {
 		return true
 	} else if e != nil {
