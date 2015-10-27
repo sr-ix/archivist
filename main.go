@@ -16,17 +16,16 @@ import (
 	"launchpad.net/gommap"
 )
 
-var runStage = flag.String("stage", "", "specify the stage to run - can be \"mapper\" or \"reducer\"")
-var numDelims = flag.Uint("numDelims", 0, "specify the number of times the delimiter is expected to appear in each line")
+var expectedDelims = flag.Uint("numDelims", 0, "specify the number of times the delimiter is expected to appear in each line")
 var filename = flag.String("file", "", "specify the file to open")
 var destination = flag.String("destination", "", "specify where to write results")
 var badRows = flag.String("badRows", "", "specify where to write bad rows")
 var bufferSize = flag.Uint("bufferSize", 8196, "specify the buffer size to use why scanning through files")
 
-func main() {
+func checkFlags() {
 	flag.Parse()
 
-	if *runStage == "" || *numDelims == 0 || *filename == "" || *destination == "" || *badRows == "" {
+	if *expectedDelims == 0 || *filename == "" || *destination == "" || *badRows == "" {
 		flag.PrintDefaults()
 		return
 	}
@@ -34,18 +33,11 @@ func main() {
 	if _, err := os.Stat(*filename); os.IsNotExist(err) {
 		log.Fatalf("no such file or directory: %s", *filename)
 	}
-
-	switch *runStage {
-	case "mapper":
-		runMapper()
-	case "reducer":
-		runReducer()
-	default:
-		log.Fatalln("stage must be either \"mapper\" or \"reducer\"")
-	}
 }
 
-func runMapper() {
+func main() {
+	checkFlags()
+
 	file, err := os.Open(*filename)
 	check(err)
 
@@ -68,7 +60,6 @@ func runMapper() {
 
 	jobs := make(chan []byte)
 	results := make(chan string)
-	//bad := make(chan string)
 
 	wg := new(sync.WaitGroup)
 	for w := 0; w <= 3; w++ {
@@ -89,37 +80,70 @@ func runMapper() {
 	}()
 
 	for v := range results {
-		fmt.Fprintf(os.Stdout, "%s\n", v)
+		if strings.HasPrefix(v, "trimmed:") {
+			//fmt.Fprintf(os.Stdout, "%s\n", v[strings.IndexAny(v, ":")+1:])
+		} else if strings.HasPrefix(v, "bad:") {
+			fmt.Fprintf(os.Stdout, "%s\n", v[strings.IndexAny(v, ":")+1:])
+		} else {
+			//fmt.Fprintf(os.Stdout, "%s\n", v)
+		}
 	}
+
 }
 
 func normalizeLines(jobs <-chan []byte, results chan<- string, wg *sync.WaitGroup) {
-	defer wg.Done()
+	//defer wg.Done()
 
 	j := <-jobs
 	scanner := bufio.NewScanner(bytes.NewReader(j))
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		//delimCount := uint(strings.Count(line, "|"))
-
+		delimCount := uint(strings.Count(line, "|"))
 		values := strings.Split(line, "|")
 
-		var buf bytes.Buffer
+		if delimCount < *expectedDelims {
+			var fixBuf bytes.Buffer
 
-		for _, value := range values {
-			trimmedValue := strings.TrimSpace(value)
+			fixBuf.WriteString("trimmed:")
+			fixBuf.WriteString(strings.TrimSpace(line))
 
-			buf.WriteString(trimmedValue)
+			scanner.Scan()
+			line2 := scanner.Text()
+			fixBuf.WriteString(strings.TrimSpace(line2))
 
-			if !strings.Contains(value, "\n") {
-				buf.WriteString("\\|")
-			} else {
-				buf.WriteString("\n")
+			scanner.Scan()
+			line3 := scanner.Text()
+			fixBuf.WriteString(strings.TrimSpace(line3))
+
+			results <- fixBuf.String()
+		} else if delimCount > *expectedDelims {
+			var badBuf bytes.Buffer
+
+			badBuf.WriteString("bad:")
+			badBuf.WriteString(line)
+
+			results <- badBuf.String()
+		} else {
+			var goodBuf bytes.Buffer
+
+			for _, value := range values {
+				trimmedValue := strings.TrimSpace(value)
+
+				goodBuf.WriteString(trimmedValue)
+
+				if !strings.Contains(value, "\n") {
+					goodBuf.WriteString("\\|")
+				} else {
+					goodBuf.WriteString("\n")
+				}
 			}
+
+			results <- goodBuf.String()
 		}
-		results <- string(buf.String())
 	}
+
+	wg.Done()
 }
 
 func runReducer() {
