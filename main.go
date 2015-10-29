@@ -39,9 +39,9 @@ func main() {
 	checkFlags()
 
 	// check existence of s3 bucket as src
-	greeting, _ := getObjectsInBucket()
-	fmt.Println(greeting)
-	// get array of all object names
+	objects, _ := getObjectsInBucket()
+	fmt.Println(*objects.Contents[0].Key)
+	// get array of all object names - use objects.Contents
 	// loop a goroutine for each file to:
 	//// -stream object to a mmapped file
 	//// -fix the lines
@@ -87,6 +87,7 @@ func fixFile() {
 
 	lines[numLines-1] = bytes.Trim(lines[numLines-1], "\n")
 
+	// dear lord, fix this
 	sub := [][][]byte{
 		lines[:(numLines / 4)],
 		lines[(numLines / 4):(numLines / 2)],
