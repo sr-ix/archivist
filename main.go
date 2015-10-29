@@ -38,11 +38,26 @@ func main() {
 	// validate & parse the flags sent into the command
 	checkFlags()
 
-	// check existence of s3 bucket as src
-	objects, _ := getObjectsInBucket()
-	fmt.Println(*objects.Contents[0].Key)
 	// get array of all object names - use objects.Contents
+	objects, _ := getObjectsInBucket()
 	// loop a goroutine for each file to:
+	svc := s3.New(nil)
+	result, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(*srcBucket),
+		Key:    aws.String(*objects.Contents[0].Key),
+	})
+	if err != nil {
+		log.Fatal("Failed to get object", err)
+	}
+	file, err := os.Create("./data/test.txt")
+	if err != nil {
+		log.Fatal("Failed to create file", err)
+	}
+	if _, err := io.Copy(file, result.Body); err != nil {
+		log.Fatal("Failed to copy object to file", err)
+	}
+	result.Body.Close()
+	file.Close()
 	//// -stream object to a mmapped file
 	//// -fix the lines
 	//// -upload bad rows to separate files
