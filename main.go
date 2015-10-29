@@ -8,37 +8,73 @@ import (
 	"io"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 
-	//"github.com/aws/aws-sdk-go/aws"
-	//"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/defaults"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"launchpad.net/gommap"
 )
 
 var expectedDelims = flag.Uint("numDelims", 0, "specify the number of times the delimiter is expected to appear in each line")
-var filename = flag.String("file", "", "specify the file to open")
-var destination = flag.String("destination", "", "specify where to write results")
-var badRows = flag.String("badRows", "", "specify where to write bad rows")
 var bufferSize = flag.Uint("bufferSize", 8196, "specify the buffer size to use why scanning through files")
+var srcBucket = flag.String("srcBucket", "", "specify the full path the bucket that contains the files needing fixing")
+var destBucket = flag.String("destBucket", "", "specify a full path to the bucket where the results will be stored")
+var badBucket = flag.String("badBucket", "", "specify a full path to the bucket where the unfixable bad results will be stored")
+var objPrefix = flag.String("objPrefix", "", "specify the prefix of attached to the objects in question")
 
 func checkFlags() {
 	flag.Parse()
 
-	if *expectedDelims == 0 || *filename == "" || *destination == "" || *badRows == "" {
+	if *expectedDelims == 0 || *srcBucket == "" || *destBucket == "" || *badBucket == "" || *objPrefix == "" {
 		flag.PrintDefaults()
 		return
-	}
-
-	if _, err := os.Stat(*filename); os.IsNotExist(err) {
-		log.Fatalf("no such file or directory: %s", *filename)
 	}
 }
 
 func main() {
+	// validate & parse the flags sent into the command
 	checkFlags()
 
-	file, err := os.Open(*filename)
+	// check existence of s3 bucket as src
+	greeting, _ := getObjectsInBucket()
+	fmt.Println(greeting)
+	// get array of all object names
+	// loop a goroutine for each file to:
+	//// -stream object to a mmapped file
+	//// -fix the lines
+	//// -upload bad rows to separate files
+	//// -reupload to s3
+	// when all are done
+}
+
+func getObjectsInBucket() (*s3.ListObjectsOutput, error) {
+	defaults.DefaultConfig.Region = aws.String("us-west-2")
+
+	svc := s3.New(nil)
+
+	params := &s3.ListObjectsInput{
+		Bucket: aws.String(*srcBucket), // Required
+		Prefix: aws.String(*objPrefix),
+	}
+	resp, err := svc.ListObjects(params)
+
+	if err != nil {
+		// Print the error, cast err to awserr.Error to get the Code and
+		// Message from an error.
+		fmt.Println(err.Error())
+		return resp, err
+	}
+
+	// Pretty-print the response data.
+	fmt.Println(reflect.TypeOf(resp))
+	return resp, nil
+}
+
+func fixFile() {
+	file, err := os.Open("./data/0000.txt")
 	check(err)
 
 	mmap, err := gommap.Map(file.Fd(), gommap.PROT_READ, gommap.MAP_PRIVATE)
@@ -146,27 +182,10 @@ func normalizeLines(jobs <-chan []byte, results chan<- string, wg *sync.WaitGrou
 	wg.Done()
 }
 
-func runReducer() {
-	//svc := s3.New(&aws.Config{Region: aws.String("us-west-2")})
-}
-
-func increment(group string, counter string) {
-	//fmt.Fprintf(os.Stderr, "reporter:counter:%s,%s,1\n", group, counter)
-}
-
 func check(e error) {
 	if e != nil {
 		log.Fatal(e)
 	}
-}
-
-func foundEOF(e error) bool {
-	if e == io.EOF {
-		return true
-	} else if e != nil {
-		log.Fatal(e)
-	}
-	return false
 }
 
 func countLines(r io.Reader) (int, error) {
